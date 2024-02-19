@@ -1,0 +1,470 @@
+setwd('C:\\Users\\lenovo\\Desktop\\R')
+dir.create('results')
+library(rms)
+all.samples<-read.delim('all.sample.txt',sep='\t',header = T)
+head(all.samples)
+pancer.score<-read.delim('pancer.DRGs.txt',sep='\t',header = T)
+head(pancer.score)
+pancer.score=merge(pancer.score,all.samples[,c("Samples","type.x")],by='Samples')
+head(pancer.score)
+#
+cli<-read.delim('cli.txt',sep='\t',header = T)
+head(cli)
+cli=data.frame(Samples=paste0(cli$bcr_patient_barcode,'-01'),
+               Age=cli$age_at_initial_pathologic_diagnosis,
+               Gender=cli$gender)
+pancer.score.cli<-merge(pancer.score,cli,by='Samples')
+head(pancer.score.cli)
+table(pancer.score.cli$Age)
+pancer.score.cli$Age[pancer.score.cli$Age=='#N/A']<-NA
+
+dat=pancer.score.cli[,c("type","Age","riskscorez","OS.time","OS")]
+head(dat)
+colnames(dat)=c('Cancertype','Age','DRGsScore','futime','fustat')
+dat$futime
+dat$futime=dat$futime/365
+dat$Age=as.numeric(dat$Age)
+dd<-datadist(dat)
+options(datadist="dd")
+options(na.action="na.delete")
+coxpbc<-cph(formula = Surv(futime,fustat) ~DRGsScore+Age+Cancertype,data=dat,x=T,y=T,surv = T,na.action=na.delete) 
+surv<-Survival(coxpbc) 
+surv3<-function(x) surv(1,x)
+surv4<-function(x) surv(3,x)
+surv5<-function(x) surv(5,x)
+surv6<-function(x) surv(10,x)
+
+x<-nomogram(coxpbc,fun = list(surv3,surv4,surv5,surv6),lp=T,
+            funlabel = c('1-year survival Probability',
+                         '3-year survival Probability',
+                         '5-year survival Probability',
+                         '10-year survival Probability'),
+            maxscale = 100,fun.at = c(0.95,0.9,0.8,0.7,0.6,0.5,0.4,0.3,0.2,0.1))
+pdf('results/fig4a.pdf',height = 7,width = 15)
+plot(x, lplabel="Linear Predictor",
+     xfrac=.35,varname.label=TRUE, varname.label.sep="=", ia.space=.2, 
+     tck=NA, tcl=-0.20, lmgp=0.3,
+     points.label='Points', total.points.label='Total Points',
+     total.sep.page=FALSE, 
+     cap.labels=FALSE,cex.var = 1.6,cex.axis = 1.05,lwd=5,
+     label.every = 1,col.grid = gray(c(0.8, 0.95)))
+dev.off()
+#
+mycol<-c("#A6CEE3","#1F78B4","#33adff","#2166AC")
+names(mycol) = c("dencol","boxcocl","obscol","spkcol")
+mycol<- as.list(mycol)
+
+#install.packages("regplot","vioplot","sm","beanplot")
+library(survival)
+pbccox <- coxph(formula = Surv(futime,fustat) ~DRGsScore+Age+Cancertype , data = dat)
+
+library(regplot)
+#fig4A2
+regplot(pbccox,
+        observation=data.frame(dat[,"fustat"]), 
+        failtime = c(1,3,5,10), 
+        prfail = TRUE, 
+        showP = T, 
+        droplines = F,
+        colors = mycol, 
+        rank="range",
+        interval="confidence") 
+dev.off()
+
+pbcglm <- glm(fustat ~DRGsScore+Age+Cancertype , family = "binomial", data=dat )
+#fig4A3
+regplot(pbcglm, 
+        observation=dat[1,], 
+        odds=TRUE, 
+        interval="confidence")
+dev.off()
+
+
+dat1=dat
+dat1$futime=dat1$futime*365
+
+f5<-cph(formula = Surv(futime,fustat) ~DRGsScore+Age+Cancertype,data=dat1,x=T,y=T,surv = T,na.action=na.delete,time.inc = 5*365) 
+cal5<-calibrate(f5, cmethod="KM", method="boot",u=5*365,m=1500,B=1000)
+
+f1<-cph(formula = Surv(futime,fustat) ~DRGsScore+Age+Cancertype,data=dat1,x=T,y=T,surv = T,na.action=na.delete,time.inc = 1*365) 
+cal1<-calibrate(f1, cmethod="KM", method="boot",u=1*365,m=1500,B=1000)
+
+f3<-cph(formula = Surv(futime,fustat) ~DRGsScore+Age+Cancertype,data=dat1,x=T,y=T,surv = T,na.action=na.delete,time.inc = 3*365) 
+cal3<-calibrate(f3, cmethod="KM", method="boot",u=3*365,m=1500,B=1000)
+
+
+pdf('results/1.pdf')
+plot(cal1,
+     lwd = 2,
+     lty = 1,
+     errbar.col = c("sandybrown"),
+     xlim = c(0,1),ylim= c(0,1),
+     xlab = "Nomogram-prediced OS (%)",ylab = "Observed OS (%)",
+     col = c("sandybrown"),
+     cex.lab=1.5,cex.axis=1.5, cex.main=1.5, cex.sub=0.6)
+lines(cal1[,c('mean.predicted',"KM")],
+      type= 'b',
+      lwd = 2,
+      col = c("sandybrown"),
+      pch = 16)
+mtext("")
+box(lwd = 1)
+abline(0,1,lty= 3,
+       lwd = 2,
+       col =c("#224444"))
+dev.off()
+
+pdf('results/3.pdf')
+plot(cal3,
+     lwd = 2,
+     lty = 1,
+     errbar.col = c("#B2182B"),
+     xlim = c(0,1),ylim= c(0,1),
+     xlab = "Nomogram-prediced OS (%)",ylab = "Observed OS (%)",
+     col = c("#B2182B"),
+     cex.lab=1.5,cex.axis=1.5, cex.main=1.5, cex.sub=0.6)
+lines(cal3[,c('mean.predicted',"KM")],
+      type= 'b',
+      lwd = 2,
+      col = c("#B2182B"),
+      pch = 16)
+mtext("")
+box(lwd = 1)
+abline(0,1,lty= 3,
+       lwd = 2,
+       col =c("#224444"))
+dev.off()
+
+
+pdf('results/5.pdf')
+plot(cal5,
+     lwd = 2,
+     lty = 1,
+     errbar.col = c("#2166AC"),
+     xlim = c(0,1),ylim= c(0,1),
+     xlab = "Nomogram-prediced OS (%)",ylab = "Observed OS (%)",
+     col = c("#2166AC"),
+     cex.lab=1.5,cex.axis=1.5, cex.main=1.5, cex.sub=0.6)
+lines(cal5[,c('mean.predicted',"KM")],
+      type= 'b',
+      lwd = 2,
+      col = c("#2166AC"),
+      pch = 16)
+mtext("")
+box(lwd = 1)
+abline(0,1,lty= 3,
+       lwd = 2,
+       col =c("#224444"))
+dev.off()
+
+pdf("results/135.pdf",width = 8,height = 8)
+plot(cal3,lwd = 2,lty = 0,errbar.col = c("#B2182B"),
+     
+     xlim = c(0,1),ylim= c(0,1),
+     xlab = "Nomogram-prediced OS (%)",ylab = "Observed OS (%)",
+     col = c("#B2182B"),
+     cex.lab=1.5,cex.axis=1.5, cex.main=1.5, cex.sub=0.6)
+lines(cal3[,c('mean.predicted',"KM")],
+      type = 'b', lwd = 1, col = c("#B2182B"), pch = 16)
+mtext("")
+
+plot(cal5,lwd = 2,lty = 0,errbar.col = c("#2166AC"),
+     xlim = c(0,1),ylim= c(0,1),col = c("#2166AC"),add = T)
+lines(cal5[,c('mean.predicted',"KM")],
+      type = 'b', lwd = 1, col = c("#2166AC"), pch = 16)
+plot(cal1,lwd = 2,lty = 0,errbar.col = c("sandybrown"),
+     xlim = c(0,1),ylim= c(0,1),col = c("sandybrown"),add = T)
+lines(cal1[,c('mean.predicted',"KM")],
+      type = 'b', lwd = 1, col = c("sandybrown"), pch = 16)
+
+abline(0,1, lwd = 2, lty = 3, col = c("#224444"))
+
+legend("topleft", 
+       legend = c("1-year","3-year","5-year"), 
+       col =c("sandybrown","#B2182B","#2166AC"), 
+       lwd = 2,
+       cex = 1.5,
+       bty = "y")
+dev.off()
+#AUC
+head(pancer.score.cli)
+pancer.tra<-pancer.score.cli[which(pancer.score.cli$type.x=='tra'),]
+ROC_tra=timeROC::timeROC(T=pancer.tra$OS.time/365, 
+                         delta=pancer.tra$OS,
+                         marker=pancer.tra$riskscorez, cause=1,
+                         weighting='marginal',
+                         times=1, 
+                         ROC=TRUE,iid = T)
+ROC_tra$AUC
+
+ROC_tra.nom=timeROC::timeROC(T=pancer.tra$OS.time/365, 
+                             delta=pancer.tra$OS,
+                             marker=pancer.tra$riskscorez,
+                             cause=1,
+                             weighting='marginal',
+                             times=1, other_markers = c(pancer.tra$Age,pancer.tra$type),
+                             ROC=TRUE,iid = T)
+ROC_tra.nom$AUC
+pancer.test<-pancer.score.cli[which(pancer.score.cli$type.x=='test'),]
+ROC_test=timeROC::timeROC(T=pancer.test$OS.time/365, 
+                          delta=pancer.test$OS,
+                          marker=pancer.test$riskscorez, cause=1,
+                          weighting='marginal',
+                          times=1, 
+                          ROC=TRUE,iid = T)
+ROC_test$AUC
+
+ROC_test.nom=timeROC::timeROC(T=pancer.test$OS.time/365, 
+                              delta=pancer.test$OS,
+                              marker=pancer.test$riskscorez,
+                              cause=1,
+                              weighting='marginal',
+                              times=1, other_markers = c(pancer.test$Age,pancer.test$type),
+                              ROC=TRUE,iid = T)
+ROC_test.nom$AUC
+
+
+my.color=ggsci::pal_jco(alpha = 0.8)(9)[1:4]
+my.color
+pdf('results/ROC1.pdf')
+plot(ROC_tra, time=1, col=my.color[4], title=FALSE, lwd=2)
+plot(ROC_tra.nom, time=1, col=my.color[1], title=FALSE, lwd=2,add = T)
+plot(ROC_test, time=1, col=my.color[3], title=FALSE, lwd=2,add = T)
+plot(ROC_test.nom, time=1, col=my.color[2], title=FALSE, lwd=2,add = T)
+
+legend('bottomright',
+       c(paste0('TCGA trian (Nomogram) AUC at 1-years: ',round(ROC_tra.nom$AUC[2],2)),
+         paste0('TCGA test (Nomogram) AUC at 1-years: ',round(ROC_test.nom$AUC[2],2)),
+         paste0('TCGA trian (DRGsScore) AUC at 1-years: ',round(ROC_tra$AUC[2],2)),
+         paste0('TCGA test (DRGsScore) AUC at 1-years: ',round(ROC_test$AUC[2],2))),
+       col=my.color,lwd=2,bty = 'n')
+dev.off()
+#AUC
+library("timeROC")
+pancer.roc=pancer.score.cli
+pancer.roc$Age=as.numeric(pancer.roc$Age)
+pancer.roc$type=as.numeric(as.factor(pancer.roc$type))
+pancer.roc.tra=pancer.roc[which(pancer.roc$type.x=='tra'),]
+pancer.roc.test=pancer.roc[which(pancer.roc$type.x=='test'),]
+
+ROC.DSST.tra=timeROC(T=pancer.roc.tra$OS.time,
+                     delta=pancer.roc.tra$OS,
+                     marker=pancer.roc.tra$riskscorez,
+                     cause=1,weighting="marginal",
+                     times=c(1:10)*365,
+                     iid=TRUE)
+ROC.DSST.test=timeROC(T=pancer.roc.test$OS.time,
+                      delta=pancer.roc.test$OS,
+                      marker=pancer.roc.test$riskscorez,
+                      cause=1,weighting="marginal",
+                      times=c(1:10)*365,
+                      iid=TRUE)
+ROC.DSST.tra.nomo=timeROC(T=pancer.roc.tra$OS.time,
+                          delta=pancer.roc.tra$OS,
+                          marker=pancer.roc.tra$riskscorez,
+                          other_markers =  c(pancer.roc.tra$Age,pancer.roc.tra$type),
+                          cause=1,weighting="marginal",
+                          times=c(1:10)*365,
+                          iid=TRUE)
+ROC.DSST.test.nomo=timeROC(T=pancer.roc.test$OS.time,
+                           delta=pancer.roc.test$OS,
+                           marker=pancer.roc.test$riskscorez,
+                           other_markers =  c(pancer.test$Age,pancer.test$type),
+                           cause=1,weighting="marginal",
+                           times=c(1:10)*365,
+                           iid=TRUE)
+
+pdf('results/Fig4d.pdf',height = 5,width = 6)
+plotAUCcurve(ROC.DSST.tra,conf.int=F,col=my.color[3])
+plotAUCcurve(ROC.DSST.test,conf.int=F,col=my.color[4],add=TRUE)
+plotAUCcurve(ROC.DSST.tra.nomo,conf.int=F,col=my.color[1],add=TRUE)
+plotAUCcurve(ROC.DSST.test.nomo,conf.int=F,col=my.color[2],add=TRUE)
+legend("topright",c("TCGA train (Nomogram)",'TCGA test (Nomogram)',
+                    'TCGA train (DRGsScore)','TCGA test (DRGsScore)')
+       ,col=my.color[c(1:4)],lty=c(1,1,1,1),lwd=c(1,1,1,1))
+
+
+plotDCA<-function(status,fmlas,modelNames,data){
+    set.seed(123)
+    all.mod=list()
+    for(i in 1:length(fmlas)){
+        fmla <- as.formula(paste0("status~",fmlas[i]))
+        model<-rmda::decision_curve(fmla,
+                                    data=data,
+                                    bootstraps=500)
+        all.mod=c(all.mod,list(model))
+    }
+    rmda::plot_decision_curve(all.mod,
+                              curve.names=modelNames,
+                              xlim=c(0,1),legend.position="topright",
+                              confidence.intervals=FALSE)
+}
+library(survival)
+library(rms)
+library(ggDCA)
+predictTime=1*365  
+tra.risk.nomo<-cph(Surv(OS.time,OS)~riskscorez+type+Age,pancer.roc.tra)
+test.risk<-cph(Surv(OS.time,OS)~riskscorez,pancer.roc.test)
+test.risk.nomo<-cph(Surv(OS.time,OS)~riskscorez+type+Age,pancer.roc.test)
+all.risk<-cph(Surv(OS.time,OS)~riskscorez,pancer.roc.all)
+all.risk.nomo<-cph(Surv(OS.time,OS)~riskscorez+type+Age,pancer.roc.all)
+
+risk_train=dca(tra.risk,tra.risk.nomo, times=predictTime)
+ggplot(risk_train, linetype=1)
+
+risk_test=dca(test.risk,test.risk.nomo, times=predictTime)
+ggplot(risk_test, linetype=1)
+
+risk_all=dca(all.risk,all.risk.nomo, times=predictTime)
+ggplot(risk_all, linetype=1)
+
+
+fmla1 <- as.formula(paste0("Surv(OS.time, OS) ~",'riskscorez'))
+cox1 <- cph(fmla1, data = pancer.roc.tra,surv = T,x = T,y = T)
+fp1 <- as.data.frame(predict(cox1))
+
+fmla1 <- as.formula(paste0("Surv(OS.time, OS) ~",'riskscorez+Age+type'))
+cox1 <- cph(fmla1, data = pancer.roc.tra,surv = T,x = T,y = T)
+fp2 <- as.data.frame(predict(cox1))
+
+train.fp.al=cbind.data.frame(Riskscore=fp1,Nomogram=fp2)
+colnames(train.fp.al)=c('DRGsScore','Nomogram')
+train.fp.al$status=pancer.roc.tra$OS
+
+pdf('results/train.dca2.pdf',height = 5,width = 5)
+plotDCA(status = train.fp.al$status
+        ,fmlas = c('Nomogram','DRGsScore')
+        ,modelNames = c('Nomogram','DRGsScore'),
+        data = train.fp.al)
+dev.off()
+
+fmla1 <- as.formula(paste0("Surv(OS.time, OS) ~",'riskscorez'))
+cox1 <- cph(fmla1, data = pancer.roc.test,surv = T,x = T,y = T)
+fp1 <- as.data.frame(predict(cox1))
+
+fmla1 <- as.formula(paste0("Surv(OS.time, OS) ~",'riskscorez+Age+type'))
+cox1 <- cph(fmla1, data = pancer.roc.test,surv = T,x = T,y = T)
+fp2 <- as.data.frame(predict(cox1))
+
+test.fp.al=cbind.data.frame(Riskscore=fp1,Nomogram=fp2)
+colnames(test.fp.al)=c('DRGsScore','Nomogram')
+test.fp.al$status=pancer.roc.test$OS
+
+pdf('results/test.dca.pdf',height = 5,width = 5)
+plotDCA(status = test.fp.al$status
+        ,fmlas = c('Nomogram','DRGsScore')
+        ,modelNames = c('Nomogram','DRGsScore'),
+        data = test.fp.al)
+dev.off()
+
+fmla1 <- as.formula(paste0("Surv(OS.time, OS) ~",'riskscorez'))
+cox1 <- cph(fmla1, data = pancer.roc.all,surv = T,x = T,y = T)
+fp1 <- as.data.frame(predict(cox1))
+
+fmla1 <- as.formula(paste0("Surv(OS.time, OS) ~",'riskscorez+Age+type'))
+cox1 <- cph(fmla1, data = pancer.roc.all,surv = T,x = T,y = T)
+fp2 <- as.data.frame(predict(cox1))
+
+all.fp.al=cbind.data.frame(Riskscore=fp1,Nomogram=fp2)
+colnames(all.fp.al)=c('DRGsScore','Nomogram')
+all.fp.al$status=pancer.roc.all$OS
+
+pdf('results/all.dca.pdf',height = 5,width = 5)
+plotDCA(status = all.fp.al$status
+        ,fmlas = c('Nomogram','DRGsScore')
+        ,modelNames = c('Nomogram','DRGsScore'),
+        data = all.fp.al)
+dev.off()
+
+
+
+
+write.table(pancer.score.cli,file="pancer.score.cli.txt",sep="\t",quote=F,row.names=F)
+
+pancer.score.cli<-read.delim('pancer.score.cli.txt',sep='\t',header = T)
+pancer.all<-pancer.score.cli[which(pancer.score.cli$type.c=='all'),]
+ROC_all=timeROC::timeROC(T=pancer.all$OS.time/356, 
+                         delta=pancer.all$OS,
+                         marker=pancer.all$riskscorez, cause=1,
+                         weighting='marginal',
+                         times=1, 
+                         ROC=TRUE,iid = T)
+ROC_all$AUC
+
+ROC_all.nom=timeROC::timeROC(T=pancer.all$OS.time/365, 
+                             delta=pancer.all$OS,
+                             marker=pancer.all$riskscorez,
+                             cause=1,
+                             weighting='marginal',
+                             times=1, other_markers = c(pancer.all$Age,pancer.all$type),
+                             ROC=TRUE,iid = T)
+ROC_all.nom$AUC
+
+
+pdf('results/ROC.DRGs.pdf')
+plot(ROC_tra, time=1, col="sandybrown", title=FALSE, lwd=2)
+plot(ROC_test, time=1, col="#B2182B", title=FALSE, lwd=2,add = T)
+plot(ROC_all, time=1, col="#2166AC", title=FALSE, lwd=2,add = T)
+
+legend('bottomright',
+       c(paste0('TCGA train AUC at 1-years: ',round(ROC_tra$AUC[2],2)),
+         paste0('TCGA test AUC at 1-years: ',round(ROC_test$AUC[2],2)),
+         paste0('TCGA all AUC at 1-years: ',round(ROC_all$AUC[2],2))),
+       col=c("sandybrown","#B2182B","#2166AC"),lwd=2,cex = 1.5,bty = 'n')
+dev.off()
+
+
+pdf('results/ROC.nom.pdf',width = 8,height = 8)
+plot(ROC_tra.nom, time=1, col="sandybrown", title=FALSE, lwd=2)
+plot(ROC_test.nom, time=1, col="#B2182B", title=FALSE, lwd=2,add = T)
+plot(ROC_all.nom, time=1, col="#2166AC", title=FALSE, lwd=2,add = T)
+legend('bottomright',
+       c(paste0('TCGA train AUC at 1-years: ',round(ROC_tra.nom$AUC[2],2)),
+         paste0('TCGA test AUC at 1-years: ',round(ROC_test.nom$AUC[2],2)),
+         paste0('TCGA all AUC at 1-years: ',round(ROC_all.nom$AUC[2],2))),
+       col=c("sandybrown","#B2182B","#2166AC"),lwd=2,cex = 1.5,bty = 'n')
+dev.off()
+
+library("timeROC")
+pancer.roc=pancer.score.cli
+pancer.roc$Age=as.numeric(pancer.roc$Age)
+pancer.roc$type=as.numeric(as.factor(pancer.roc$type))
+pancer.roc.tra=pancer.roc[which(pancer.roc$type.x=='tra'),]
+pancer.roc.test=pancer.roc[which(pancer.roc$type.x=='test'),]
+pancer.roc.all=pancer.roc[which(pancer.roc$type.c=='all'),]
+
+
+ROC.DSST.all=timeROC(T=pancer.roc.all$OS.time,
+                     delta=pancer.roc.all$OS,
+                     marker=pancer.roc.all$riskscorez,
+                     cause=1,weighting="marginal",
+                     times=c(1:10)*365,
+                     iid=TRUE)
+ROC.DSST.all.nomo=timeROC(T=pancer.roc.all$OS.time,
+                          delta=pancer.roc.all$OS,
+                          marker=pancer.roc.all$riskscorez,
+                          other_markers =  c(pancer.all$Age,pancer.all$type),
+                          cause=1,weighting="marginal",
+                          times=c(1:10)*365,
+                          iid=TRUE)
+
+pdf('results/AUC.DRG.pdf',height = 5,width = 6)
+plotAUCcurve(ROC.DSST.tra,conf.int=F,col="sandybrown")
+plotAUCcurve(ROC.DSST.test,conf.int=F,col="#B2182B",add=TRUE)
+plotAUCcurve(ROC.DSST.all,conf.int=F,col="#2166AC",add=TRUE)
+legend("topright",c("TCGA train ",'TCGA test ',
+                    'TCGA all ')
+       ,col=c("sandybrown","#B2182B","#2166AC"),cex = 1.2,lty=c(1,1,1),lwd=c(1,1,1))
+
+dev.off()
+
+
+pdf('results/AUC.nom.pdf',height = 5,width = 6)
+plotAUCcurve(ROC.DSST.tra.nomo,conf.int=F,col="sandybrown")
+plotAUCcurve(ROC.DSST.test.nomo,conf.int=F,col="#B2182B",add=TRUE)
+plotAUCcurve(ROC.DSST.all.nomo,conf.int=F,col="#2166AC",add=TRUE)
+legend("topright",c("TCGA train ",'TCGA test ',
+                    'TCGA all ')
+       ,col=c("sandybrown","#B2182B","#2166AC"),cex = 1.5,lty=c(1,1,1),lwd=c(1,1,1))
+
+dev.off()
